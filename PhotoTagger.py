@@ -167,6 +167,7 @@ def scan_for_new_files(base_path, last_scan_time, scan_mode, logger):
         logger.info("INCREMENTAL MODE: Scanning files modified after: %s", 
                     datetime.fromtimestamp(last_scan_time).strftime('%Y-%m-%d %H:%M:%S') if last_scan_time > 0 else "beginning of time")
     
+    file_count = 0
     try:
         for root, dirs, files in os.walk(base_path):
             for file in files:
@@ -181,8 +182,13 @@ def scan_for_new_files(base_path, last_scan_time, scan_mode, logger):
                             "full_path": full_path,
                             "mod_time": mod_time
                         }
+                        file_count += 1
+                        
+                        # Log progress every 100 files in backlog mode
+                        if scan_mode == "backlog" and file_count % 100 == 0:
+                            logger.info("Scanned %d files so far... (latest: %s)", file_count, normalized)
         
-        logger.info("Found %d files", len(new_files))
+        logger.info("Scan complete: Found %d files total", len(new_files))
         return new_files
     
     except Exception as e:
@@ -389,24 +395,61 @@ def batch_process_images(base_path, logger):
     """Process images in batches using processing list and completed list delta"""
     client = initialize_client(AI_PROVIDER, logger)
     
-    # Step 1: Update processing list with files based on scan mode
-    logger.info("Step 1: Updating processing list (Mode: %s)...", SCAN_MODE.upper())
-    processing_dict = update_processing_list(base_path, SCAN_MODE, logger)
+    # Load existing processing list first
+    processing_dict = load_processing_list()
+    existing_count = len(processing_dict)
     
-    # Step 2: Load completed files
-    logger.info("Step 2: Loading completed files list...")
+    if existing_count > 0:
+        logger.info("=" * 60)
+        logger.info("FOUND EXISTING PROCESSING LIST with %d files", existing_count)
+        logger.info("Checking if backlog is complete...")
+        logger.info("=" * 60)
+    
+    # Load completed files
+    logger.info("Loading completed files list...")
     completed_dict = load_completed_files()
     
-    # Step 3: Calculate delta (files in processing but not in completed)
-    logger.info("Step 3: Calculating delta (processing - completed)...")
+    # Calculate delta for existing processing list
     to_process = []
     for normalized_path, file_info in processing_dict.items():
         if normalized_path not in completed_dict:
             to_process.append((normalized_path, file_info["full_path"]))
     
+    # If existing processing list is fully completed, scan for new files
+    if existing_count > 0 and len(to_process) == 0:
+        logger.info("=" * 60)
+        logger.info("EXISTING PROCESSING LIST FULLY COMPLETED!")
+        logger.info("Now scanning for new files based on SCAN_MODE: %s", SCAN_MODE.upper())
+        logger.info("=" * 60)
+        # Rebuild processing list
+        processing_dict = update_processing_list(base_path, SCAN_MODE, logger)
+        logger.info("Processing list updated and saved to: %s", PROCESSING_LIST_FILE)
+        
+        # Recalculate delta with new processing list
+        to_process = []
+        for normalized_path, file_info in processing_dict.items():
+            if normalized_path not in completed_dict:
+                to_process.append((normalized_path, file_info["full_path"]))
+    
+    # If no existing processing list, build it now
+    elif existing_count == 0:
+        logger.info("Step 1: Building processing list (Mode: %s)...", SCAN_MODE.upper())
+        processing_dict = update_processing_list(base_path, SCAN_MODE, logger)
+        logger.info("Processing list built and saved to: %s", PROCESSING_LIST_FILE)
+        
+        # Calculate delta
+        to_process = []
+        for normalized_path, file_info in processing_dict.items():
+            if normalized_path not in completed_dict:
+                to_process.append((normalized_path, file_info["full_path"]))
+    
     logger.info("Processing list: %d files", len(processing_dict))
     logger.info("Completed list: %d files", len(completed_dict))
     logger.info("Delta (to process): %d files", len(to_process))
+    
+    if len(to_process) == 0:
+        logger.info("No files to process. All caught up!")
+        return
     
     # Step 4: Limit to daily batch size
     batch_today = to_process[:DAILY_BATCH_LIMIT]
