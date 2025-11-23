@@ -1,0 +1,5 @@
+piexif 
+Pillow
+google-genai
+mistralai 
+python-dotenv 
