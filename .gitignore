@@ -118,3 +118,6 @@ venv.bak/
 
 # Cython debug symbols
 cython_debug/
+
+photos/
+photos/20251101_193746.jpg

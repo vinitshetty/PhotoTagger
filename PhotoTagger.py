@@ -4,21 +4,26 @@ import argparse
 import logging
 from google import genai
 from google.genai import types
+from mistralai import Mistral
 from datetime import datetime
 import dotenv
 from PIL import Image
 from PIL.ExifTags import TAGS
 from PIL import PngImagePlugin
 import piexif
+import base64
 
 dotenv.load_dotenv()
 
-API_KEY = os.getenv("API_KEY")
+# API Configuration
+AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").lower()  # Options: "gemini" or "mistral"
 MODEL_NAME = os.getenv("MODEL_NAME")
+
+API_KEY = os.getenv("API_KEY")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 
 DAILY_BATCH_LIMIT = int(os.getenv("DAILY_BATCH_LIMIT", 500))
 REQUESTS_PER_MINUTE = int(os.getenv("REQUESTS_PER_MINUTE", 15))
-
 
 # Separate log files
 COMPLETED_FILES_LOG = os.path.abspath(os.getenv("COMPLETED_FILES_LOG", "completed_files.log"))
@@ -68,8 +73,14 @@ def save_completed_file(filename):
         f.write(path + "\n")
 
 
-def tag_image(client, image_path):
-    """Extract up to 15 objects from image as comma-separated list"""
+def encode_image_base64(image_path):
+    """Encode image to base64 for Mistral API"""
+    with open(image_path, "rb") as f:
+        return base64.b64encode(f.read()).decode('utf-8')
+
+
+def tag_image_gemini(client, image_path):
+    """Extract tags using Google Gemini"""
     with open(image_path, "rb") as f:
         image_bytes = f.read()
     ext = image_path.lower().split(".")[-1]
@@ -100,6 +111,60 @@ def tag_image(client, image_path):
     if hasattr(response, "output"):
         return str(response.output).strip()
     return str(response).strip()
+
+
+def tag_image_mistral(client, image_path):
+    """Extract tags using Mistral Pixtral"""
+    # Get base64 encoded image
+    base64_image = encode_image_base64(image_path)
+    ext = image_path.lower().split(".")[-1]
+    
+    # Determine mime type
+    mime_types = {"jpeg": "image/jpeg", "jpg": "image/jpeg", "png": "image/png"}
+    mime_type = mime_types.get(ext, "image/jpeg")
+    
+    prompt_text = (
+        "Analyze this image and identify up to 15 distinct objects, people, animals, food items, "
+        "scenes, activities, or things present in the photo. "
+        "Return ONLY a comma-separated list of these items. "
+        "Examples: dog, beach, baby, cake, sunrise, beer, car, tree, person, building. "
+        "Be specific and concise. Do not include any other text, just the comma-separated list."
+    )
+    
+    # Create message with image
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": prompt_text
+                },
+                {
+                    "type": "image_url",
+                    "image_url": f"data:{mime_type};base64,{base64_image}"
+                }
+            ]
+        }
+    ]
+    
+    # Call Mistral API
+    response = client.chat.complete(
+        model=MODEL_NAME,
+        messages=messages
+    )
+    
+    return response.choices[0].message.content.strip()
+
+
+def tag_image(client, image_path, provider):
+    """Route to appropriate tagging function based on provider"""
+    if provider == "gemini":
+        return tag_image_gemini(client, image_path)
+    elif provider == "mistral":
+        return tag_image_mistral(client, image_path)
+    else:
+        raise ValueError(f"Unsupported AI provider: {provider}")
 
 
 def create_png_info(metadata):
@@ -153,9 +218,30 @@ def add_tags_to_metadata(image_path, tags, logger):
         logger.error("Failed to add metadata to %s: %s", os.path.basename(image_path), str(e))
 
 
+def initialize_client(provider, logger):
+    """Initialize the appropriate AI client based on provider"""
+    if provider == "gemini":
+        if not API_KEY:
+            logger.error("API_KEY not found in environment variables for Gemini")
+            raise ValueError("API_KEY is required for Gemini provider")
+        logger.info("Using Google Gemini (gemini-2.5-flash)")
+        return genai.Client(api_key=API_KEY)
+    
+    elif provider == "mistral":
+        if not MISTRAL_API_KEY:
+            logger.error("MISTRAL_API_KEY not found in environment variables")
+            raise ValueError("MISTRAL_API_KEY is required for Mistral provider")
+        logger.info("Using Mistral Pixtral (pixtral-12b-2409)")
+        return Mistral(api_key=MISTRAL_API_KEY)
+    
+    else:
+        logger.error(f"Unknown AI provider: {provider}")
+        raise ValueError(f"Unsupported AI provider: {provider}. Use 'gemini' or 'mistral'")
+
+
 def batch_process_images(image_dir, logger):
     """Process images in batches, tracking completed files separately"""
-    client = genai.Client(api_key=API_KEY)
+    client = initialize_client(AI_PROVIDER, logger)
     completed = load_completed_files()
     
     # Normalize incoming directory and make sure it exists
@@ -180,7 +266,7 @@ def batch_process_images(image_dir, logger):
     
     for img in batch_today:
         try:
-            result = tag_image(client, img)
+            result = tag_image(client, img, AI_PROVIDER)
             
             # Log the comma-separated objects
             logger.info("Processed %s: %s", os.path.basename(img), result)
