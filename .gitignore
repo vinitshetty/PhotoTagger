@@ -122,3 +122,4 @@ cython_debug/
 photos/*.*
 
 processing_list.json
+scan_state.json
