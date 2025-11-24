@@ -90,20 +90,20 @@ PHOTOS_BASE_PATH=/mnt/nas/Photos
 ### 3. Run the Script
 
 ```bash
-python image_tagger.py
+python PhotoTagger.py
 ```
 
 ## 🔄 Workflow
 
-### Initial Backlog Processing
+### Initial Processing
 
 1. Set `SCAN_MODE=backlog` in `.env`
-2. Run script - it will scan all photos recursively
+2. Run script - it will scan all photos recursively in all nested folders
 3. Processes up to `DAILY_BATCH_LIMIT` photos per run
-4. Run again to process next batch (automatically resumes)
+4. If failed or killed - run again to process next batch (automatically handles processed photos)
 5. Repeat until all photos are tagged
 
-### Production Mode (New Photos Only)
+### Incremental New Photos Only
 
 1. After backlog complete, set `SCAN_MODE=incremental`
 2. Script only scans for new/modified photos since last run
@@ -116,14 +116,14 @@ python image_tagger.py
 3. **Delta Calculation**: `processing_list - completed_list = files_to_process`
 4. **Batch Processing**: Processes delta up to daily limit
 5. **Metadata Writing**: Tags written to photo file properties
-6. **Resume on Restart**: Always continues from last position
+6. **Resume on Restart**: Always continues from last position to handle resuming from failures
 
 ## 💾 Storage Compatibility
 
 ### Local Storage
 - ✅ Internal hard drives (HDD/SSD)
 - ✅ External USB drives
-- ✅ SD cards and portable storage
+- ✅ SD cards, portable storage, and just anything.
 
 ### Network Storage (NAS)
 - ✅ Synology NAS (SMB/CIFS mount)
@@ -138,7 +138,7 @@ python image_tagger.py
 
 ## 🔀 Cross-Platform Migration
 
-Move your project between Windows and Linux without reprocessing:
+Move your project between Windows, MacBook and Linux without reprocessing:
 
 1. **Copy tracking files**:
    - `processing_list.json`
