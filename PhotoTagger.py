@@ -341,29 +341,74 @@ def add_tags_to_metadata(image_path, tags, logger):
         ext = image_path.lower().split(".")[-1]
         
         if ext in ['jpg', 'jpeg']:
+            # Handle JPEG files with EXIF
             try:
                 exif_dict = piexif.load(image_path)
-            except:
+            except Exception as e:
+                logger.warning("Could not load existing EXIF from %s: %s. Creating new EXIF.", 
+                             os.path.basename(image_path), str(e))
                 exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
             
-            exif_dict["0th"][piexif.ImageIFD.ImageDescription] = tags.encode('utf-8')
-            exif_dict["Exif"][piexif.ExifIFD.UserComment] = tags.encode('utf-8')
+            # Clean the EXIF dict to remove problematic tags
+            # Remove tags that commonly cause issues with piexif
+            problematic_tags = [
+                41729,  # FileSource
+                41730,  # SceneType
+                41988,  # DigitalZoomRatio
+                41985,  # CustomRendered
+                41986,  # ExposureMode
+                41987,  # WhiteBalance
+                41989,  # FocalLengthIn35mmFilm
+                41990,  # SceneCaptureType
+                41991,  # GainControl
+                41992,  # Contrast
+                41993,  # Saturation
+                41994,  # Sharpness
+                41995,  # DeviceSettingDescription
+                41996,  # SubjectDistanceRange
+            ]
+            if "Exif" in exif_dict:
+                for tag in problematic_tags:
+                    exif_dict["Exif"].pop(tag, None)
             
-            exif_bytes = piexif.dump(exif_dict)
-            piexif.insert(exif_bytes, image_path)
-            logger.info("Added EXIF metadata to: %s", os.path.basename(image_path))
+            # Add tags to ImageDescription (0x010e) and UserComment (0x9286)
+            try:
+                exif_dict["0th"][piexif.ImageIFD.ImageDescription] = tags.encode('utf-8')
+                exif_dict["Exif"][piexif.ExifIFD.UserComment] = tags.encode('utf-8')
+                
+                # Save EXIF back to image
+                exif_bytes = piexif.dump(exif_dict)
+                piexif.insert(exif_bytes, image_path)
+                logger.info("Added EXIF metadata to: %s", os.path.basename(image_path))
+            except Exception as e:
+                # If dump/insert fails, try with minimal EXIF (only our tags)
+                logger.warning("Standard EXIF write failed for %s, trying minimal EXIF: %s", 
+                             os.path.basename(image_path), str(e))
+                minimal_exif = {
+                    "0th": {piexif.ImageIFD.ImageDescription: tags.encode('utf-8')},
+                    "Exif": {piexif.ExifIFD.UserComment: tags.encode('utf-8')},
+                    "GPS": {},
+                    "1st": {},
+                    "thumbnail": None
+                }
+                exif_bytes = piexif.dump(minimal_exif)
+                piexif.insert(exif_bytes, image_path)
+                logger.info("Added minimal EXIF metadata to: %s", os.path.basename(image_path))
             
         elif ext == 'png':
+            # Handle PNG files with PIL
             img = Image.open(image_path)
             metadata = img.info.copy()
             metadata['Description'] = tags
             metadata['Title'] = tags
             metadata['Comment'] = tags
             
+            # Save with metadata
             img.save(image_path, "PNG", pnginfo=create_png_info(metadata))
             logger.info("Added PNG metadata to: %s", os.path.basename(image_path))
             
         elif ext == 'heic':
+            # HEIC files are more complex, log that we're skipping
             logger.warning("HEIC metadata writing not supported, skipping: %s", os.path.basename(image_path))
             
     except Exception as e:
