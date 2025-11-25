@@ -1,4 +1,5 @@
-# Photo Metadata Tagger with AI
+# Photo Metadata Tagger with AI 
+## (Google Photos Search Experience for all your photos)
 
 Automatically tag your photo library using AI vision models. The script analyzes images and writes descriptive tags directly to photo metadata (EXIF/PNG properties), making your photos searchable in any file explorer or photo management app.
 
