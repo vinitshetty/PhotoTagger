@@ -123,3 +123,5 @@ photos/*.*
 
 processing_list.json
 scan_state.json
+# Local backups (do not commit)
+.env.local.bak

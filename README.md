@@ -26,7 +26,7 @@ pip install google-genai mistralai python-dotenv Pillow piexif
 
 ## 🚀 Quick Start
 
-### 1. Create `.env` Configuration
+### 1. Create `.env` Configuration using sample file `.env-sample`
 
 ```env
 # AI Provider: "gemini" or "mistral"
