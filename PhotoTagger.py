@@ -149,6 +149,32 @@ def get_file_modification_time(filepath):
         return 0
 
 
+def preserve_file_timestamps(filepath):
+    """
+    Get the current file timestamps (access time and modification time).
+    Returns a tuple of (atime, mtime) that can be used to restore timestamps later.
+    """
+    try:
+        stat_info = os.stat(filepath)
+        return (stat_info.st_atime, stat_info.st_mtime)
+    except Exception as e:
+        return None
+
+
+def restore_file_timestamps(filepath, timestamps):
+    """
+    Restore file timestamps (access time and modification time).
+    timestamps should be a tuple of (atime, mtime) from preserve_file_timestamps.
+    """
+    if timestamps:
+        try:
+            os.utime(filepath, timestamps)
+            return True
+        except Exception as e:
+            return False
+    return False
+
+
 def scan_for_new_files(base_path, last_scan_time, scan_mode, logger):
     """
     Recursively scan for image files.
@@ -336,7 +362,16 @@ def create_png_info(metadata):
 
 
 def add_tags_to_metadata(image_path, tags, logger):
-    """Add tags to image file metadata (EXIF for JPEG, PNG metadata for PNG)"""
+    """Add tags to image file metadata (EXIF for JPEG, PNG metadata for PNG) while preserving timestamps"""
+    
+    # STEP 1: Preserve original file timestamps BEFORE any modifications
+    original_timestamps = preserve_file_timestamps(image_path)
+    if original_timestamps:
+        logger.debug("Preserved timestamps for %s: atime=%s, mtime=%s", 
+                    os.path.basename(image_path),
+                    datetime.fromtimestamp(original_timestamps[0]).strftime('%Y-%m-%d %H:%M:%S'),
+                    datetime.fromtimestamp(original_timestamps[1]).strftime('%Y-%m-%d %H:%M:%S'))
+    
     try:
         ext = image_path.lower().split(".")[-1]
         
@@ -350,28 +385,15 @@ def add_tags_to_metadata(image_path, tags, logger):
                 exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
             
             # Clean the EXIF dict to remove problematic tags
-            # Remove tags that commonly cause issues with piexif
             problematic_tags = [
-                41729,  # FileSource
-                41730,  # SceneType
-                41988,  # DigitalZoomRatio
-                41985,  # CustomRendered
-                41986,  # ExposureMode
-                41987,  # WhiteBalance
-                41989,  # FocalLengthIn35mmFilm
-                41990,  # SceneCaptureType
-                41991,  # GainControl
-                41992,  # Contrast
-                41993,  # Saturation
-                41994,  # Sharpness
-                41995,  # DeviceSettingDescription
-                41996,  # SubjectDistanceRange
+                41729, 41730, 41988, 41985, 41986, 41987, 41989, 41990, 
+                41991, 41992, 41993, 41994, 41995, 41996
             ]
             if "Exif" in exif_dict:
                 for tag in problematic_tags:
                     exif_dict["Exif"].pop(tag, None)
             
-            # Add tags to ImageDescription (0x010e) and UserComment (0x9286)
+            # Add tags to ImageDescription and UserComment
             try:
                 exif_dict["0th"][piexif.ImageIFD.ImageDescription] = tags.encode('utf-8')
                 exif_dict["Exif"][piexif.ExifIFD.UserComment] = tags.encode('utf-8')
@@ -381,7 +403,7 @@ def add_tags_to_metadata(image_path, tags, logger):
                 piexif.insert(exif_bytes, image_path)
                 logger.info("Added EXIF metadata to: %s", os.path.basename(image_path))
             except Exception as e:
-                # If dump/insert fails, try with minimal EXIF (only our tags)
+                # If dump/insert fails, try with minimal EXIF
                 logger.warning("Standard EXIF write failed for %s, trying minimal EXIF: %s", 
                              os.path.basename(image_path), str(e))
                 minimal_exif = {
@@ -413,6 +435,13 @@ def add_tags_to_metadata(image_path, tags, logger):
             
     except Exception as e:
         logger.error("Failed to add metadata to %s: %s", os.path.basename(image_path), str(e))
+    finally:
+        # STEP 2: ALWAYS restore original timestamps after any modification
+        if original_timestamps:
+            if restore_file_timestamps(image_path, original_timestamps):
+                logger.debug("Restored timestamps for %s", os.path.basename(image_path))
+            else:
+                logger.warning("Failed to restore timestamps for %s", os.path.basename(image_path))
 
 
 def initialize_client(provider, logger):
@@ -496,7 +525,7 @@ def batch_process_images(base_path, logger):
         logger.info("No files to process. All caught up!")
         return
     
-    # Step 4: Limit to daily batch size
+    # Limit to daily batch size
     batch_today = to_process[:DAILY_BATCH_LIMIT]
     
     logger.info("[%s] Starting batch of %d images...", datetime.now(), len(batch_today))
@@ -516,7 +545,7 @@ def batch_process_images(base_path, logger):
             
             logger.info("Processed %s: %s", os.path.basename(full_path), result)
             
-            # Add tags to file metadata
+            # Add tags to file metadata (timestamps are preserved inside this function)
             add_tags_to_metadata(full_path, result, logger)
             
             # Add to completed files list
