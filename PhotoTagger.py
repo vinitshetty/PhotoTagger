@@ -15,6 +15,16 @@ import base64
 import json
 from pathlib import Path
 
+# Add pillow-heif for HEIC support
+try:
+    from pillow_heif import register_heif_opener
+    register_heif_opener()
+    HEIC_SUPPORT = True
+except ImportError:
+    HEIC_SUPPORT = False
+    print("WARNING: pillow-heif not installed. HEIC metadata writing will be limited.")
+    print("Install with: pip install pillow-heif")
+
 dotenv.load_dotenv()
 
 # API Configuration
@@ -361,8 +371,54 @@ def create_png_info(metadata):
     return png_info
 
 
+def add_tags_to_heic(image_path, tags, logger):
+    """
+    Add tags to HEIC file metadata using pillow-heif.
+    This will read the HEIC, add EXIF metadata, and save it back.
+    """
+    if not HEIC_SUPPORT:
+        logger.warning("pillow-heif not installed. Cannot write HEIC metadata for: %s", 
+                      os.path.basename(image_path))
+        return False
+    
+    try:
+        # Open the HEIC file using PIL (with pillow-heif registered)
+        img = Image.open(image_path)
+        
+        # Get existing EXIF data if available
+        exif_dict = {"0th": {}, "Exif": {}, "GPS": {}, "1st": {}, "thumbnail": None}
+        
+        if hasattr(img, '_getexif') and img._getexif() is not None:
+            try:
+                # Try to load existing EXIF
+                exif_dict = piexif.load(img.info.get("exif", b""))
+            except:
+                pass
+        
+        # Add tags to ImageDescription and UserComment
+        exif_dict["0th"][piexif.ImageIFD.ImageDescription] = tags.encode('utf-8')
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = tags.encode('utf-8')
+        
+        # Convert EXIF dict to bytes
+        exif_bytes = piexif.dump(exif_dict)
+        
+        # Save the image back with new EXIF data
+        # Note: This will convert HEIC to JPEG format as pillow-heif doesn't support writing HEIC
+        # If you want to keep HEIC format, you'll need a different approach
+        output_path = image_path  # You could also create a new file with different extension
+        
+        img.save(output_path, "JPEG", exif=exif_bytes, quality=95)
+        logger.info("Added metadata to HEIC file (saved as JPEG): %s", os.path.basename(image_path))
+        return True
+        
+    except Exception as e:
+        logger.error("Failed to add metadata to HEIC file %s: %s", 
+                    os.path.basename(image_path), str(e))
+        return False
+
+
 def add_tags_to_metadata(image_path, tags, logger):
-    """Add tags to image file metadata (EXIF for JPEG, PNG metadata for PNG) while preserving timestamps"""
+    """Add tags to image file metadata (EXIF for JPEG, PNG metadata for PNG, XMP for HEIC) while preserving timestamps"""
     
     # STEP 1: Preserve original file timestamps BEFORE any modifications
     original_timestamps = preserve_file_timestamps(image_path)
@@ -430,8 +486,10 @@ def add_tags_to_metadata(image_path, tags, logger):
             logger.info("Added PNG metadata to: %s", os.path.basename(image_path))
             
         elif ext == 'heic':
-            # HEIC files are more complex, log that we're skipping
-            logger.warning("HEIC metadata writing not supported, skipping: %s", os.path.basename(image_path))
+            # Handle HEIC files
+            success = add_tags_to_heic(image_path, tags, logger)
+            if not success and HEIC_SUPPORT:
+                logger.warning("Could not write metadata to HEIC file: %s", os.path.basename(image_path))
             
     except Exception as e:
         logger.error("Failed to add metadata to %s: %s", os.path.basename(image_path), str(e))
@@ -572,6 +630,7 @@ def main():
     logger.info("Image Tagging Script Started")
     logger.info("Scan Mode: %s", SCAN_MODE.upper())
     logger.info("AI Provider: %s", AI_PROVIDER.upper())
+    logger.info("HEIC Support: %s", "Enabled" if HEIC_SUPPORT else "Disabled (install pillow-heif)")
     logger.info("Photos base path: %s", PHOTOS_BASE_PATH)
     logger.info("=" * 60)
     

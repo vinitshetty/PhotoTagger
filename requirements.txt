@@ -3,3 +3,4 @@ Pillow
 google-genai
 mistralai 
 python-dotenv 
+pillow-heif
