@@ -19,6 +19,7 @@ Automatically tag your photo library using AI vision models. The script analyzes
 - **Detailed Logging**: Separate logs for processing status and errors
 
 <img width="665" height="223" alt="image" src="https://github.com/user-attachments/assets/9180717e-2b80-495d-89a7-f1e6e68829ce" />
+<img width="665" height="223" alt="image" src="https://github.com/user-attachments/assets/84f5eecf-e5f2-4641-9eda-f29a3183693c" />
 
 ## 📋 Requirements
 
