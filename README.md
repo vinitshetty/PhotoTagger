@@ -18,6 +18,8 @@ Automatically tag your photo library using AI vision models. The script analyzes
 - **Kill-Safe**: Resume from exactly where you left off after interruption
 - **Detailed Logging**: Separate logs for processing status and errors
 
+<img width="665" height="223" alt="image" src="https://github.com/user-attachments/assets/9180717e-2b80-495d-89a7-f1e6e68829ce" />
+
 ## 📋 Requirements
 
 ```bash
